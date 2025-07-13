@@ -6,7 +6,7 @@ class APIKeyGuardian {
   constructor(options = {}) {
     this.options = {
       ignoredFiles: ['.git/', 'node_modules/', '.env.example', ...(options.ignoredFiles || [])],
-      ignoredExtensions: ['.jpg', '.png', '.gif', '.pdf', '.zip', ...(options.ignoredExtensions || [])],
+      ignoredExtensions: ['.jpg', '.png', '.gif', '.pdf', '.zip', '.tar.gz', ...(options.ignoredExtensions || [])],
       customPatterns: options.customPatterns || [],
       ...options
     };
@@ -45,64 +45,131 @@ class APIKeyGuardian {
       { name: 'Private Key', pattern: /-----BEGIN [A-Z ]+PRIVATE KEY-----/, severity: 'critical' },
       { name: 'Bearer Token', pattern: /Bearer\s+[a-zA-Z0-9_-]{20,}/, severity: 'medium' },
       
-      // Add custom patterns
-      ...this.options.customPatterns
+      // Process custom patterns
+      ...this.processCustomPatterns()
     ];
   }
 
-  shouldIgnoreFile(filePath) {
-    const normPath = filePath.replace(/\\/g, '/').toLowerCase();
-    const pathSegments = normPath.split('/').filter(Boolean);
-    const ignoredSegments = this.options.ignoredFiles.map(ignored => {
-      let seg = ignored.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
-      if (seg.startsWith('*')) return seg;
-      if (seg.startsWith('.env') || seg.includes('.')) return seg;
-      return seg;
+  processCustomPatterns() {
+    return this.options.customPatterns.map(pattern => {
+      let regex;
+      if (typeof pattern.pattern === 'string') {
+        // Handle string patterns that might be in regex format
+        const match = pattern.pattern.match(/^\/(.+)\/([gimuy]*)$/);
+        if (match) {
+          regex = new RegExp(match[1], match[2]);
+        } else {
+          regex = new RegExp(pattern.pattern);
+        }
+      } else {
+        regex = pattern.pattern;
+      }
+      
+      return {
+        name: pattern.name,
+        pattern: regex,
+        severity: pattern.severity || 'medium'
+      };
     });
-    if (pathSegments.some(seg => ignoredSegments.includes(seg))) {
-      return true;
+  }
+
+  shouldIgnoreFile(filePath) {
+    const absolutePath = path.resolve(filePath);
+    const normPath = absolutePath.replace(/\\/g, '/').toLowerCase();
+    const relativePath = path.relative(process.cwd(), absolutePath).replace(/\\/g, '/').toLowerCase();
+    
+    // If relativePath is empty or starts with '..', it's outside the project
+    if (!relativePath || relativePath.startsWith('..')) {
+      return false;
     }
-    if (this.options.ignoredFiles.some(ignored => {
-      const lowerIgnored = ignored.replace(/\\/g, '/').toLowerCase();
-      return normPath.endsWith(lowerIgnored);
-    })) {
-      return true;
+    
+    // Split path into segments for directory matching
+    const pathSegments = relativePath.split('/').filter(Boolean);
+    
+    for (const ignored of this.options.ignoredFiles) {
+      const normalizedIgnored = ignored.replace(/\\/g, '/').toLowerCase();
+      
+      // Handle directory patterns (ending with /)
+      if (normalizedIgnored.endsWith('/')) {
+        const dirName = normalizedIgnored.slice(0, -1);
+        
+        // Check if any segment matches the directory name
+        if (pathSegments.includes(dirName)) {
+          return true;
+        }
+        
+        // Check if path starts with the directory
+        if (relativePath.startsWith(dirName + '/')) {
+          return true;
+        }
+      }
+      
+      // Handle wildcard patterns
+      if (normalizedIgnored.includes('*')) {
+        const pattern = normalizedIgnored.replace(/\*/g, '.*');
+        if (new RegExp(pattern).test(relativePath)) {
+          return true;
+        }
+      }
+      
+      // Handle exact file matches
+      if (relativePath === normalizedIgnored || 
+          relativePath.endsWith('/' + normalizedIgnored) ||
+          pathSegments[pathSegments.length - 1] === normalizedIgnored) {
+        return true;
+      }
     }
-    if (this.options.ignoredExtensions.some(ext => normPath.endsWith(ext.toLowerCase()))) {
-      return true;
+    
+    // Check ignored extensions
+    for (const ext of this.options.ignoredExtensions) {
+      if (normPath.endsWith(ext.toLowerCase())) {
+        return true;
+      }
     }
-    if (ignoredSegments.some(seg => seg.startsWith('*') && normPath.endsWith(seg.slice(1)))) {
-      return true;
-    }
+    
     return false;
   }
 
   async scanFile(filePath) {
     try {
       const stat = await fs.promises.stat(filePath);
-      // Skip files larger than 1MB
+      
+      // Skip files larger than 1MB to avoid performance issues
       if (stat.size > 1024 * 1024) {
         return [];
       }
-      const content = await fs.promises.readFile(filePath, 'utf8');
+      
+      let content;
+      try {
+        content = await fs.promises.readFile(filePath, 'utf8');
+      } catch (error) {
+        // If file can't be read as UTF-8, skip it (likely binary)
+        return [];
+      }
+      
       const findings = [];
-      for (const pattern of this.patterns) {
-        const matches = content.match(new RegExp(pattern.pattern, 'g'));
-        if (matches) {
-          for (const match of matches) {
-            const lines = content.substring(0, content.indexOf(match)).split('\n');
-            const lineNumber = lines.length;
-            findings.push({
-              file: filePath,
-              line: lineNumber,
-              pattern: pattern.name,
-              severity: pattern.severity,
-              match: match.substring(0, 50) + (match.length > 50 ? '...' : ''),
-              fullMatch: match
-            });
-          }
+      const lines = content.split('\n');
+      
+      for (const patternDef of this.patterns) {
+        const matches = [...content.matchAll(new RegExp(patternDef.pattern, 'g'))];
+        
+        for (const match of matches) {
+          const matchIndex = match.index;
+          const lineNumber = content.substring(0, matchIndex).split('\n').length;
+          const lineContent = lines[lineNumber - 1] || '';
+          
+          findings.push({
+            file: path.relative(process.cwd(), filePath),
+            line: lineNumber,
+            pattern: patternDef.name,
+            severity: patternDef.severity,
+            match: match[0].substring(0, 50) + (match[0].length > 50 ? '...' : ''),
+            fullMatch: match[0],
+            lineContent: lineContent.trim()
+          });
         }
       }
+      
       return findings;
     } catch (error) {
       if (error.code !== 'ENOENT') {
@@ -114,14 +181,18 @@ class APIKeyGuardian {
 
   async scanDirectory(dirPath, recursive = true) {
     let findings = [];
+    
     try {
       const items = await fs.promises.readdir(dirPath);
       const tasks = [];
+      
       for (const item of items) {
         const itemPath = path.join(dirPath, item);
+        
         if (this.shouldIgnoreFile(itemPath)) {
           continue;
         }
+        
         try {
           const stats = await fs.promises.stat(itemPath);
           if (stats.isDirectory() && recursive) {
@@ -130,13 +201,16 @@ class APIKeyGuardian {
             tasks.push(this.scanFile(itemPath));
           }
         } catch (err) {
+          // Skip files/directories that can't be accessed
         }
       }
+      
       const results = await Promise.all(tasks);
       findings = results.flat();
     } catch (error) {
       console.warn(`Warning: Could not scan directory ${dirPath}: ${error.message}`);
     }
+    
     return findings;
   }
 
@@ -167,6 +241,9 @@ class APIKeyGuardian {
         output += `  ${severityColor(`[${finding.severity.toUpperCase()}]`)} `;
         output += `Line ${finding.line}: ${finding.pattern}\n`;
         output += `    ${chalk.gray(finding.match)}\n`;
+        if (finding.lineContent) {
+          output += `    ${chalk.dim('Context: ' + finding.lineContent)}\n`;
+        }
       });
       
       output += '\n';
@@ -177,6 +254,7 @@ class APIKeyGuardian {
     output += chalk.cyan('  1. Remove the secrets from your code\n');
     output += chalk.cyan('  2. Use environment variables instead\n');
     output += chalk.cyan('  3. Add secrets to .env file and .gitignore\n');
+    output += chalk.cyan('  4. Consider using a secrets manager for production\n');
     
     return output;
   }

@@ -53,62 +53,111 @@ Examples:
   }
 
   const guardian = new APIKeyGuardian(config);
+  
   (async () => {
     let findings = [];
+    
+    // Improved file collection function
     async function collectFiles(dir, shouldIgnoreFile) {
       let files = [];
-      if (shouldIgnoreFile(dir)) return files;
+      const absoluteDir = path.resolve(dir);
+      
+      if (shouldIgnoreFile(absoluteDir)) {
+        return files;
+      }
+      
       try {
-        const items = await fs.promises.readdir(dir);
+        const items = await fs.promises.readdir(absoluteDir);
+        
         for (const item of items) {
-          const itemPath = path.join(dir, item);
-          if (shouldIgnoreFile(itemPath)) continue;
+          const itemPath = path.join(absoluteDir, item);
+          
+          if (shouldIgnoreFile(itemPath)) {
+            continue;
+          }
+          
           try {
             const stats = await fs.promises.stat(itemPath);
             if (stats.isDirectory()) {
-              files = files.concat(await collectFiles(itemPath, shouldIgnoreFile));
+              // Recursively collect files from subdirectories
+              const subFiles = await collectFiles(itemPath, shouldIgnoreFile);
+              files = files.concat(subFiles);
             } else if (stats.isFile()) {
               files.push(itemPath);
             }
-          } catch {}
+          } catch (error) {
+            // Skip files/directories that can't be accessed
+            if (error.code !== 'ENOENT' && error.code !== 'EACCES') {
+              console.warn(chalk.yellow(`Warning: Could not access ${itemPath}: ${error.message}`));
+            }
+          }
         }
-      } catch {}
+      } catch (error) {
+        if (error.code !== 'ENOENT' && error.code !== 'EACCES') {
+          console.warn(chalk.yellow(`Warning: Could not read directory ${absoluteDir}: ${error.message}`));
+        }
+      }
+      
       return files;
     }
 
     if (args.includes('--scan-all')) {
+      console.log(chalk.blue('🔍 Scanning entire project...'));
+      console.log(chalk.cyan(`Starting from: ${process.cwd()}`));
+      
       const allFiles = await collectFiles(process.cwd(), guardian.shouldIgnoreFile.bind(guardian));
       const total = allFiles.length;
+      
+      console.log(chalk.cyan(`Found ${total} files to scan`));
+      
+      // Show some sample directories being scanned
+      const sampleDirs = [...new Set(allFiles.slice(0, 10).map(f => path.dirname(path.relative(process.cwd(), f))))];
+      console.log(chalk.dim(`Sample directories: ${sampleDirs.slice(0, 5).join(', ')}${sampleDirs.length > 5 ? '...' : ''}`));
+      
       findings = [];
+      
       for (let i = 0; i < total; i++) {
-        process.stdout.write(`\rScanning file ${i + 1} of ${total}: ${allFiles[i]}   `);
+        const relativePath = path.relative(process.cwd(), allFiles[i]);
+        const displayPath = relativePath.length > 80 ? '...' + relativePath.slice(-77) : relativePath;
+        process.stdout.write(`\rScanning ${i + 1}/${total}: ${displayPath}${' '.repeat(Math.max(0, 100 - displayPath.length))}`);
         findings.push(...(await guardian.scanFile(allFiles[i])));
       }
       process.stdout.write('\n');
+      
     } else if (args.length > 0) {
       const targets = args.filter(arg => !arg.startsWith('--'));
       let allFiles = [];
+      
       for (const target of targets) {
-        if (fs.existsSync(target)) {
-          const stats = fs.statSync(target);
+        const targetPath = path.resolve(target);
+        if (fs.existsSync(targetPath)) {
+          const stats = fs.statSync(targetPath);
           if (stats.isDirectory()) {
-            allFiles = allFiles.concat(await collectFiles(target, guardian.shouldIgnoreFile.bind(guardian)));
+            allFiles = allFiles.concat(await collectFiles(targetPath, guardian.shouldIgnoreFile.bind(guardian)));
           } else if (stats.isFile()) {
-            allFiles.push(target);
+            allFiles.push(targetPath);
           }
+        } else {
+          console.warn(chalk.yellow(`Warning: Path does not exist: ${target}`));
         }
       }
+      
       const total = allFiles.length;
       findings = [];
+      
       for (let i = 0; i < total; i++) {
-        process.stdout.write(`\rScanning file ${i + 1} of ${total}: ${allFiles[i]}   `);
+        const relativePath = path.relative(process.cwd(), allFiles[i]);
+        process.stdout.write(`\rScanning ${i + 1}/${total}: ${relativePath}${' '.repeat(20)}`);
         findings.push(...(await guardian.scanFile(allFiles[i])));
       }
       process.stdout.write('\n');
+      
     } else {
       findings = await scanStagedFiles(guardian);
     }
+    
     console.log(guardian.formatFindings(findings));
+    
     if (findings.length > 0) {
       process.exit(1);
     }
@@ -121,15 +170,19 @@ async function scanStagedFiles(guardian) {
     const stagedFiles = execSync('git diff --cached --name-only', { encoding: 'utf8' })
       .split('\n')
       .filter(file => file.trim())
+      .map(file => path.resolve(file))
       .filter(file => fs.existsSync(file));
+    
     let findings = [];
     for (const file of stagedFiles) {
-      findings.push(...(await guardian.scanFile(file)));
+      if (!guardian.shouldIgnoreFile(file)) {
+        findings.push(...(await guardian.scanFile(file)));
+      }
     }
     return findings;
   } catch (error) {
     console.warn(chalk.yellow('Warning: Could not get staged files, scanning current directory'));
-    return await guardian.scanDirectory(process.cwd(), false);
+    return await guardian.scanDirectory(process.cwd(), true);
   }
 }
 

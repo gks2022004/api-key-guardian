@@ -6,21 +6,73 @@
     "build/",
     ".next/",
     ".yarn/",
+    "coverage/",
+    ".nyc_output/",
+    "tmp/",
+    "temp/",
+    ".cache/",
     ".env.example",
-    "*.log"
+    ".env.local",
+    ".env.development.local",
+    ".env.test.local",
+    ".env.production.local",
+    "*.log",
+    "*.lock",
+    "yarn.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml"
   ],
   "ignoredExtensions": [
     ".jpg",
+    ".jpeg",
     ".png",
     ".gif",
+    ".bmp",
+    ".tiff",
+    ".webp",
+    ".ico",
+    ".svg",
     ".pdf",
     ".zip",
-    ".tar.gz"
+    ".tar",
+    ".tar.gz",
+    ".rar",
+    ".7z",
+    ".exe",
+    ".dmg",
+    ".deb",
+    ".rpm",
+    ".msi",
+    ".bin",
+    ".iso",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mkv",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".webm",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf"
   ],
   "customPatterns": [
     {
       "name": "Custom API Key",
-      "pattern": "/custom_api_key_[a-zA-Z0-9]{32}/",
+      "pattern": "custom_api_key_[a-zA-Z0-9]{32}",
+      "severity": "high"
+    },
+    {
+      "name": "Supabase Anon Key",
+      "pattern": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+",
+      "severity": "medium"
+    },
+    {
+      "name": "Firebase Config",
+      "pattern": "firebase[_-]?config[\"']?\\s*[:=]\\s*[\"']?[a-zA-Z0-9_-]{20,}",
       "severity": "high"
     }
   ]

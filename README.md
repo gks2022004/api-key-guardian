@@ -63,6 +63,7 @@ Create a `.apiguardian.json` file in your project root to customize ignored file
     "dist/",
     "build/",
     ".next/",
+    ".yarn/",
     ".env.example",
     "*.log"
   ],

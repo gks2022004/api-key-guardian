@@ -5,6 +5,7 @@
     "dist/",
     "build/",
     ".next/",
+    ".yarn/",
     ".env.example",
     "*.log"
   ],

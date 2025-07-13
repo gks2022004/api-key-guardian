@@ -1,0 +1,22 @@
+{
+  "name": "api-key-guardian",
+  "version": "1.0.10",
+  "description": "Prevents accidental exposure of API keys in commits",
+  "main": "index.js",
+  "bin": {
+    "api-key-guardian": "./bin/cli.js"
+  },
+  "scripts": {
+    "install-hooks": "node bin/install-hooks.js"
+  },
+  "keywords": ["security", "api-keys", "git", "pre-commit", "secrets"],
+  "author": "Gaurav Kumar",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "fs-extra": "^10.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}

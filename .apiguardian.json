@@ -1,0 +1,26 @@
+{
+  "ignoredFiles": [
+    ".git/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    ".next/",
+    ".env.example",
+    "*.log"
+  ],
+  "ignoredExtensions": [
+    ".jpg",
+    ".png",
+    ".gif",
+    ".pdf",
+    ".zip",
+    ".tar.gz"
+  ],
+  "customPatterns": [
+    {
+      "name": "Custom API Key",
+      "pattern": "/custom_api_key_[a-zA-Z0-9]{32}/",
+      "severity": "high"
+    }
+  ]
+}
